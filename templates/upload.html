@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Upload Meeting</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+
+</head>
+
+<body>
+<nav class="navbar">
+
+
+<a href="/">Dashboard</a>
+
+<a href="/upload">Upload Meeting</a>
+
+<a href="/meetings">Meeting History</a>
+
+<a href="/analytics">Analytics</a>
+
+
+</nav>
+
+<div class="container">
+
+    <h1>AI Meeting-to-Execution Agent</h1>
+
+    <div class="card">
+
+        <h2>Upload Meeting Recording</h2>
+
+        <form
+            action="/process"
+            method="POST"
+            enctype="multipart/form-data">
+
+            <input
+                type="file"
+                name="audio"
+                required>
+
+            <button type="submit">
+                Process Meeting
+            </button>
+
+        </form>
+
+    </div>
+    {% if success %}
+<div class="card">
+<p style="color:green;">
+{{success}}
+</p>
+</div>
+{% endif %}
+{% if error %}
+<div class="card">
+<p style="color:red;">
+{{error}}
+</p>
+</div>
+{% endif %}
+    {% if transcript %}
+
+    <div class="card">
+
+        <h2>Transcript</h2>
+
+        <p>{{ transcript }}</p>
+
+    </div>
+
+    {% endif %}
+
+    {% if summary %}
+
+    <div class="card">
+
+        <h2>Meeting Summary</h2>
+
+        <p>{{ summary }}</p>
+
+    </div>
+
+    {% endif %}
+
+    {% if risk %}
+
+    <div class="card risk">
+
+        <h2>Risk Analysis</h2>
+
+        <p>{{ risk }}</p>
+
+    </div>
+
+    {% endif %}
+
+</div>
+
+</body>
+
+</html>

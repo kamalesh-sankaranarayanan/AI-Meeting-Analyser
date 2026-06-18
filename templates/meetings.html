@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Meeting History</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <nav class="navbar">
+
+
+<a href="/">Dashboard</a>
+
+<a href="/upload">Upload Meeting</a>
+
+<a href="/meetings">Meeting History</a>
+
+<a href="/analytics">Analytics</a>
+
+
+</nav>
+
+{% for meeting in meetings %}
+
+<div class="card">
+
+    <h3>
+📁 {{meeting[1]}}
+</h3>
+
+    <p>
+    <b>Date:</b>
+    {{meeting[4]}}
+</p>
+
+<h4>Summary</h4>
+<p>
+    {{meeting[2]}}
+</p>
+
+<h4>Risk Analysis</h4>
+<p>
+    {{meeting[3]}}
+</p>
+
+<a class="btn"
+href="/meeting/{{meeting[0]}}">
+View Details
+</a>
+
+</div>
+
+{% endfor %}
+
+</body>
+</html>

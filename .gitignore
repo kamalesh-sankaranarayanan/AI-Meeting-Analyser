@@ -1,0 +1,11 @@
+.env
+credentials.json
+token.json
+token.pickle
+database.db
+__pycache__/
+*.pyc
+uploads/
+venv311/
+*.mp4
+*.mp3

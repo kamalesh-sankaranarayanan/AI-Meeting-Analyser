@@ -1,0 +1,146 @@
+body{
+    margin:0;
+    font-family:Arial, sans-serif;
+    background:#f4f6f9;
+}
+
+.navbar{
+    background:#111827;
+    padding:15px 40px;
+    display:flex;
+    gap:25px;
+}
+
+.navbar a{
+    color:white;
+    text-decoration:none;
+    font-size:18px;
+    font-weight:bold;
+}
+
+.navbar a:hover{
+    color:#60a5fa;
+}
+
+.container{
+    width:90%;
+    margin:auto;
+}
+
+h1{
+    text-align:center;
+    color:#222;
+}
+
+.card{
+    background:white;
+    padding:20px;
+    margin-top:20px;
+    border-radius:12px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.1);
+}
+
+.risk{
+    border-left:6px solid red;
+}
+
+.stats{
+    display:flex;
+    justify-content:center;
+    gap:30px;
+    flex-wrap:wrap;
+    margin-top:40px;
+    margin-bottom:40px;
+}
+
+table{
+    width:100%;
+    background:white;
+    border-collapse:collapse;
+    margin-top:20px;
+    border-radius:10px;
+    overflow:hidden;
+}
+
+th{
+    background:#0f172a;
+    color:white;
+    padding:15px;
+}
+
+td{
+    padding:15px;
+}
+
+tr:nth-child(even){
+    background:#f9fafb;
+}
+
+button{
+    background:#2563eb;
+    color:white;
+    border:none;
+    padding:10px 20px;
+    border-radius:6px;
+    cursor:pointer;
+}
+
+button:hover{
+    background:#1d4ed8;
+}
+
+input[type=file]{
+    margin-right:10px;
+}
+.stat-card{
+    background:white;
+    width:220px;
+    padding:30px;
+    border-radius:15px;
+    text-align:center;
+    box-shadow:0 4px 12px rgba(0,0,0,0.1);
+}
+.btn{
+    background:#16a34a;
+    color:white;
+    padding:8px 15px;
+    border-radius:6px;
+    text-decoration:none;
+}
+
+.btn:hover{
+    background:#15803d;
+}
+h1{
+    text-align:center;
+    margin-top:30px;
+    margin-bottom:30px;
+    font-size:48px;
+    color:#111827;
+}
+.card:hover{
+    transform:translateY(-3px);
+    transition:0.3s;
+}
+table{
+    box-shadow:0 2px 8px rgba(0,0,0,0.08);
+}
+.container{
+    width:92%;
+    max-width:1400px;
+    margin:auto;
+}
+.high{
+    color:red;
+    font-weight:bold;
+}
+
+.medium{
+    color:orange;
+    font-weight:bold;
+}
+
+.low{
+    color:green;
+    font-weight:bold;
+}

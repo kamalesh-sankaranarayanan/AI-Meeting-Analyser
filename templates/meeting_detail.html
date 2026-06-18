@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Meeting Details</title>
+
+<link rel="stylesheet"
+href="/static/style.css">
+
+</head>
+
+<body>
+
+<nav class="navbar">
+
+
+<a href="/">Dashboard</a>
+
+<a href="/upload">Upload Meeting</a>
+
+<a href="/meetings">Meeting History</a>
+
+<a href="/analytics">Analytics</a>
+
+
+</nav>
+
+<div class="container">
+
+<div class="card">
+
+<h2>{{meeting[1]}}</h2>
+
+<p>
+<b>Date:</b>
+{{meeting[5]}}
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Transcript</h2>
+
+<p>
+{{meeting[1]}}
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>Summary</h2>
+
+<p>
+{{meeting[2]}}
+</p>
+
+</div>
+
+<div class="card risk">
+
+<h2>Risk Analysis</h2>
+
+<p>
+{{meeting[3]}}
+</p>
+
+</div>
+<div class="card">
+
+<h2>Generated Tasks</h2>
+
+<table>
+
+<tr>
+<th>Task</th>
+<th>Owner</th>
+<th>Deadline</th>
+<th>Priority</th>
+<th>Status</th>
+</tr>
+
+{% for task in tasks %}
+
+<tr>
+{{task['task']}}
+{{task['owner']}}
+{{task['deadline']}}
+{{task['priority']}}
+{{task['status']}}
+</tr>
+
+{% endfor %}
+
+</table>
+<a href="/download/{{meeting[1]}}">
+    Download Report
+</a>
+</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+
+<title>AI Meeting-to-Execution Agent</title>
+
+<link rel="stylesheet"
+      href="/static/style.css">
+
+
+</head>
+
+<body>
+
+<nav class="navbar">
+
+
+<a href="/">Dashboard</a>
+
+<a href="/upload">Upload Meeting</a>
+
+<a href="/meetings">Meeting History</a>
+
+<a href="/analytics">Analytics</a>
+
+
+</nav>
+
+<div class="container">
+
+
+<h1>AI Meeting-to-Execution Agent</h1>
+
+<div class="stats">
+
+    <div class="card">
+        <h2>{{total_meetings}}</h2>
+        <p>Meetings</p>
+    </div>
+
+    <div class="card">
+        <h2>{{total_tasks}}</h2>
+        <p>Tasks</p>
+    </div>
+
+    <div class="card">
+        <h2>{{pending_tasks}}</h2>
+        <p>Pending</p>
+    </div>
+
+    <div class="card">
+        <h2>{{high_priority}}</h2>
+        <p>High Priority</p>
+    </div>
+
+</div>
+
+<div class="card">
+
+    <h2>Task Dashboard</h2>
+
+    <table>
+
+        <tr>
+            <th>Task</th>
+            <th>Owner</th>
+            <th>Deadline</th>
+            <th>Priority</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+
+        {% for task in tasks %}
+
+        <tr>
+
+            <td>{{task[1]}}</td>
+
+            <td>{{task[2]}}</td>
+
+            <td>{{task[3]}}</td>
+
+            <td>{{task[4]}}</td>
+
+            <td>{{task[5]}}</td>
+
+            <td>
+
+                {% if task[5] == "Pending" %}
+
+                <a class="btn"
+                   href="/complete/{{task[0]}}">
+                    Complete
+                </a>
+
+                {% else %}
+
+                <span style="color:green;font-weight:bold;">
+                    Done
+                </span>
+
+                {% endif %}
+
+            </td>
+
+        </tr>
+
+        {% endfor %}
+
+    </table>
+
+</div>
+
+
+</div>
+
+</body>
+
+</html>
