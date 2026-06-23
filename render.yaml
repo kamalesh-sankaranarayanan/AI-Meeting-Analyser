@@ -18,6 +18,8 @@ services:
         value: .
       - key: WHISPERX_MODEL_SIZE
         value: tiny
+      - key: ENABLE_AUDIO_TRANSCRIPTION
+        value: "false"
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

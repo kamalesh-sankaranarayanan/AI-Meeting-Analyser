@@ -1,4 +1,4 @@
-import whisperx
+﻿import whisperx
 import sqlite3
 import json
 import os
@@ -37,11 +37,11 @@ def validate_environment():
     missing = [key for key in required_keys if not os.getenv(key)]
     
     if missing:
-        logger.warning(f"⚠️ Missing environment variables: {', '.join(missing)}")
+        logger.warning(f"âš ï¸ Missing environment variables: {', '.join(missing)}")
         if "HUGGINGFACE_API_KEY" in missing:
             logger.warning("   Hugging Face key required for WhisperX and Pyannote")
     else:
-        logger.info("✅ Environment variables validated")
+        logger.info("âœ… Environment variables validated")
  
 validate_environment()
 try:
@@ -155,6 +155,7 @@ client = OpenAI(
 HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY")
 LLM_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 WHISPERX_MODEL_SIZE = os.getenv("WHISPERX_MODEL_SIZE", "small")
+ENABLE_AUDIO_TRANSCRIPTION = os.getenv("ENABLE_AUDIO_TRANSCRIPTION", "true").lower() == "true"
  
 # ============================================================================
 # MODEL LOADING (Lazy - loaded once)
@@ -178,7 +179,7 @@ def get_whisperx_model():
         try:
             logger.info(f"Loading WhisperX model ({WHISPERX_MODEL_SIZE})...")
             _WHISPERX_MODEL = whisperx.load_model(WHISPERX_MODEL_SIZE, device="cpu", compute_type="int8")
-            logger.info("✅ WhisperX model loaded successfully")
+            logger.info("âœ… WhisperX model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load WhisperX: {e}")
             raise
@@ -199,11 +200,11 @@ def get_diarization_pipeline():
     global _DIARIZATION_PIPELINE, HAS_PYANNOTE
     if _DIARIZATION_PIPELINE is None:
         if HAS_PYANNOTE is False:
-            logger.warning("⚠️ Pyannote not installed. Speaker diarization disabled.")
+            logger.warning("âš ï¸ Pyannote not installed. Speaker diarization disabled.")
             return None
         
         if not HF_TOKEN:
-            logger.warning("⚠️ HUGGINGFACE_API_KEY not set. Speaker diarization disabled.")
+            logger.warning("âš ï¸ HUGGINGFACE_API_KEY not set. Speaker diarization disabled.")
             return None
         
         try:
@@ -214,7 +215,7 @@ def get_diarization_pipeline():
                                     "pyannote/speaker-diarization-3.1",
                                     token=HF_TOKEN
                                     )
-            logger.info("✅ Pyannote diarization pipeline loaded successfully")
+            logger.info("âœ… Pyannote diarization pipeline loaded successfully")
         except Exception as e:
             HAS_PYANNOTE = False
             logger.warning(f"Failed to load Pyannote: {e}")
@@ -288,7 +289,26 @@ def transcribe_audio(audio_path: str) -> dict:
         ValueError: If transcription fails
     """
     try:
-        logger.info(f"🎵 Transcribing audio with WhisperX: {audio_path}")
+        extension = os.path.splitext(audio_path)[1].lower()
+        if extension == ".txt":
+            logger.info(f"Reading uploaded transcript text: {audio_path}")
+            with open(audio_path, "r", encoding="utf-8") as transcript_file:
+                transcript = transcript_file.read().strip()
+            if not transcript:
+                raise ValueError("Transcript file is empty.")
+            return {
+                "transcript": transcript,
+                "segments": [],
+                "language": "en"
+            }
+
+        if not ENABLE_AUDIO_TRANSCRIPTION:
+            raise ValueError(
+                "Audio transcription is disabled on this deployment to avoid memory limits. "
+                "Upload a .txt transcript file, or enable audio transcription on a larger instance."
+            )
+
+        logger.info(f"ðŸŽµ Transcribing audio with WhisperX: {audio_path}")
         
         # Step 1: Load WhisperX (CHANGED from: whisper.load_model("small"))
         model = get_whisperx_model()
@@ -297,7 +317,7 @@ def transcribe_audio(audio_path: str) -> dict:
         logger.info("Processing audio through WhisperX...")
         result = model.transcribe(audio_path, language="en")
         
-        logger.info(f"✅ Transcription complete ({len(result['segments'])} segments)")
+        logger.info(f"âœ… Transcription complete ({len(result['segments'])} segments)")
         
         # Step 3: Get speaker diarization (NEW FEATURE)
         diarization_pipeline = get_diarization_pipeline()
@@ -305,7 +325,7 @@ def transcribe_audio(audio_path: str) -> dict:
         
         if diarization_pipeline:
             try:
-                logger.info("🎤 Running speaker diarization...")
+                logger.info("ðŸŽ¤ Running speaker diarization...")
                 diarization = run_diarization(diarization_pipeline, audio_path)
                 
                 # Map speakers to timestamps
@@ -315,7 +335,7 @@ def transcribe_audio(audio_path: str) -> dict:
                         speakers_by_time[t] = speaker
                 
                 unique_speakers = len(set(speakers_by_time.values()))
-                logger.info(f"✅ Diarization complete - Identified {unique_speakers} speakers")
+                logger.info(f"âœ… Diarization complete - Identified {unique_speakers} speakers")
                 
             except Exception as e:
                 logger.warning(f"Diarization failed: {e} - continuing without speaker info")
@@ -355,7 +375,7 @@ def transcribe_audio(audio_path: str) -> dict:
         # Full transcript with speaker labels
         full_transcript = "\n".join(full_transcript_lines)
         
-        logger.info(f"✅ Full transcript with speakers ready ({len(full_transcript)} chars)")
+        logger.info(f"âœ… Full transcript with speakers ready ({len(full_transcript)} chars)")
         
         return {
             'transcript': full_transcript,
@@ -364,7 +384,7 @@ def transcribe_audio(audio_path: str) -> dict:
         }
         
     except Exception as e:
-        logger.error(f"❌ Transcription failed: {e}")
+        logger.error(f"âŒ Transcription failed: {e}")
         raise ValueError(f"Failed to transcribe audio: {e}")
  
  
@@ -383,7 +403,7 @@ def extract_summary(transcript: str) -> str:
         Summary text
     """
     try:
-        logger.info("📝 Generating meeting summary...")
+        logger.info("ðŸ“ Generating meeting summary...")
         
         summary_prompt = f"""
 Summarize this meeting in 5 concise bullet points.
@@ -407,7 +427,7 @@ Transcript (shortened):
             logger.warning("Summary returned None")
             return "Summary generation failed"
 
-        logger.info("✅ Summary generated successfully")
+        logger.info("âœ… Summary generated successfully")
 
         return summary
         
@@ -504,7 +524,7 @@ def extract_tasks(transcript: str) -> list:
         List of task dictionaries
     """
     try:
-        logger.info("📋 Extracting tasks from transcript...")
+        logger.info("ðŸ“‹ Extracting tasks from transcript...")
         
         task_prompt = f"""
 You are a Senior Project Manager.
@@ -521,34 +541,34 @@ You MUST infer tasks from project status updates.
 Examples:
 
 "The SRS still needs work"
-→ Finalize SRS
+â†’ Finalize SRS
 
 "The dashboard isn't complete"
-→ Complete dashboard implementation
+â†’ Complete dashboard implementation
 
 "Testing has not started"
-→ Perform testing
+â†’ Perform testing
 
 "API integration remains pending"
-→ Complete API integration
+â†’ Complete API integration
 
 "Authentication module is only 70% done"
-→ Complete authentication module
+â†’ Complete authentication module
 
 "We need support for gateway integration"
-→ Complete gateway integration
+â†’ Complete gateway integration
 
 "The UI still needs responsiveness checks"
-→ Perform UI responsiveness testing
+â†’ Perform UI responsiveness testing
 
 "Test cases should be prepared today"
-→ Prepare integration test cases
+â†’ Prepare integration test cases
 
 "The backend issue may delay integration"
-→ Resolve backend issue
+â†’ Resolve backend issue
 
 "We should start execution runs tomorrow"
-→ Start execution runs
+â†’ Start execution runs
 
 --------------------------------------------------
 
@@ -715,7 +735,7 @@ Transcript (shortened):
 
         tasks = cleaned_tasks
 
-        logger.info(f"✅ Extracted {len(tasks)} tasks")
+        logger.info(f"âœ… Extracted {len(tasks)} tasks")
         return tasks
     except Exception as e:
 
@@ -770,7 +790,7 @@ def detect_risks(transcript: str) -> str:
         Risk analysis text
     """
     try:
-        logger.info("⚠️ Analyzing for risks and blockers...")
+        logger.info("âš ï¸ Analyzing for risks and blockers...")
         
         risk_prompt = f"""
 Analyze this meeting transcript for potential risks, blockers, and delays.
@@ -788,7 +808,7 @@ Transcript (shortened):
         )
         
         risk_analysis = response.choices[0].message.content
-        logger.info("✅ Risk analysis complete")
+        logger.info("âœ… Risk analysis complete")
         return risk_analysis
         
     except Exception as e:
@@ -859,7 +879,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
         cursor = conn.cursor()
         
         # Insert meeting
-        logger.info("💾 Saving meeting to database...")
+        logger.info("ðŸ’¾ Saving meeting to database...")
         cursor.execute("""
             INSERT INTO meetings (filename, transcript, summary, risk, created_at)
             VALUES (?, ?, ?, ?, ?)
@@ -872,7 +892,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
         ))
         
         meeting_id = cursor.lastrowid
-        logger.info(f"✅ Meeting saved (ID: {meeting_id})")
+        logger.info(f"âœ… Meeting saved (ID: {meeting_id})")
         
         # Insert tasks with meeting_id
         for task in tasks:
@@ -911,7 +931,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
                 
                 # Send alert for high priority tasks
                 if task.get("priority") == "High":
-                    logger.info(f"🔔 Sending alert for high priority task: {task.get('task')}")
+                    logger.info(f"ðŸ”” Sending alert for high priority task: {task.get('task')}")
                     send_task_alert(task)
                     
             except sqlite3.Error as e:
@@ -919,7 +939,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
                 continue
         
         conn.commit()
-        logger.info("✅ All data saved to database")
+        logger.info("âœ… All data saved to database")
         return meeting_id
         
     except sqlite3.Error as e:
@@ -1050,7 +1070,7 @@ def process_meeting(audio_path: str, job_id=None) -> tuple:
     """
     try:
         logger.info("="*70)
-        logger.info(f"🎯 PROCESSING MEETING: {os.path.basename(audio_path)}")
+        logger.info(f"ðŸŽ¯ PROCESSING MEETING: {os.path.basename(audio_path)}")
         logger.info("="*70)
         
         meeting_hash = file_sha256(audio_path)
@@ -1121,9 +1141,9 @@ def process_meeting(audio_path: str, job_id=None) -> tuple:
         update_processing_job(job_id, "Report", 85, message="Generating report")
         logger.info("\n[5/5] REPORT GENERATION & STORAGE")
         if create_report(os.path.basename(audio_path), summary, risk):
-            logger.info("✅ Report generated")
+            logger.info("âœ… Report generated")
         else:
-            logger.warning("⚠️ Report generation failed, continuing...")
+            logger.warning("âš ï¸ Report generation failed, continuing...")
         
         # Step 6: Save to database
         update_processing_job(job_id, "Saving", 95, message="Saving meeting and tasks")
@@ -1131,7 +1151,7 @@ def process_meeting(audio_path: str, job_id=None) -> tuple:
         update_processing_job(job_id, "Completed", 100, status="Completed", message="Processing complete", meeting_id=meeting_id)
         
         logger.info("\n" + "="*70)
-        logger.info(f"✅ PROCESSING COMPLETE")
+        logger.info(f"âœ… PROCESSING COMPLETE")
         logger.info(f"   Meeting ID: {meeting_id}")
         logger.info(f"   Transcript: {len(transcript)} characters")
         logger.info(f"   Tasks: {len(tasks)}")
@@ -1141,7 +1161,7 @@ def process_meeting(audio_path: str, job_id=None) -> tuple:
         return (transcript, summary, risk)
         
     except Exception as e:
-        logger.error(f"❌ FATAL ERROR: {e}", exc_info=True)
+        logger.error(f"âŒ FATAL ERROR: {e}", exc_info=True)
         raise
  
  
@@ -1161,12 +1181,12 @@ def print_startup_status():
     print("="*70 + "\n")
     return
     print("\n" + "="*70)
-    print("🎵 AUDIO PROCESSING SETUP STATUS")
+    print("ðŸŽµ AUDIO PROCESSING SETUP STATUS")
     print("="*70)
-    print(f"✅ WhisperX:               Better transcription with word timestamps")
-    print(f"{'✅' if HAS_PYANNOTE else '⚠️'} Pyannote:                Speaker diarization {'' if HAS_PYANNOTE else '(not installed)'}")
-    print(f"{'✅' if HF_TOKEN else '⚠️'} Hugging Face Token:      {'CONFIGURED' if HF_TOKEN else 'NOT SET'}")
-    print(f"✅ OpenRouter API:         LLM for summary/tasks/risks")
+    print(f"âœ… WhisperX:               Better transcription with word timestamps")
+    print(f"{'âœ…' if HAS_PYANNOTE else 'âš ï¸'} Pyannote:                Speaker diarization {'' if HAS_PYANNOTE else '(not installed)'}")
+    print(f"{'âœ…' if HF_TOKEN else 'âš ï¸'} Hugging Face Token:      {'CONFIGURED' if HF_TOKEN else 'NOT SET'}")
+    print(f"âœ… OpenRouter API:         LLM for summary/tasks/risks")
     print("="*70 + "\n")
  
 if os.getenv("SHOW_PROCESSING_STARTUP_STATUS", "false").lower() == "true":

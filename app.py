@@ -35,7 +35,8 @@ ALLOWED_EXTENSIONS = {
     'ogg',
     'm4a',
     'flac',
-    'mp4'
+    'mp4',
+    'txt'
 }
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
  

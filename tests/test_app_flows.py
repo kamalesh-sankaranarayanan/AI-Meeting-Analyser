@@ -106,7 +106,7 @@ class AppFlowTests(unittest.TestCase):
     def test_upload_rejects_invalid_extension(self):
         response = self.client.post(
             "/process",
-            data={"audio": (io.BytesIO(b"hello"), "notes.txt")},
+            data={"audio": (io.BytesIO(b"hello"), "notes.exe")},
             content_type="multipart/form-data",
         )
 
