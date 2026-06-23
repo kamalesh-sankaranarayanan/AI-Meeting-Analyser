@@ -32,35 +32,87 @@
 <div class="container">
 
 
-<h1>AI Meeting-to-Execution Agent</h1>
+<div class="page-header">
+    <div>
+        <h1>AI Meeting-to-Execution Agent</h1>
+        <p>Track meeting outputs, task ownership, Drive ingestion, and follow-up automation.</p>
+    </div>
+
+    <div class="toolbar">
+        <form action="/agents/run" method="POST">
+            <button type="submit">Run Follow-up Agents</button>
+        </form>
+
+        <form action="/drive/check" method="POST">
+            <button type="submit" class="secondary">Check Google Drive</button>
+        </form>
+    </div>
+</div>
 
 <div class="stats">
 
-    <div class="card">
+    <div class="stat-card">
         <h2>{{total_meetings}}</h2>
         <p>Meetings</p>
     </div>
 
-    <div class="card">
+    <div class="stat-card">
         <h2>{{total_tasks}}</h2>
         <p>Tasks</p>
     </div>
 
-    <div class="card">
+    <div class="stat-card">
         <h2>{{pending_tasks}}</h2>
         <p>Pending</p>
     </div>
 
-    <div class="card">
+    <div class="stat-card">
         <h2>{{high_priority}}</h2>
         <p>High Priority</p>
     </div>
 
 </div>
 
+<div class="card drive-status-card">
+    <div class="section-title">
+        <h2>Drive Watcher</h2>
+        <span class="badge watcher-{{drive_status.status|lower|replace(' ', '-')}}">{{drive_status.status}}</span>
+    </div>
+
+    <div class="drive-metrics">
+        <div>
+            <b>{{drive_status.last_checked or "Never"}}</b>
+            <span>Last checked</span>
+        </div>
+        <div>
+            <b>{{drive_status.files_seen or 0}}</b>
+            <span>Files seen</span>
+        </div>
+        <div>
+            <b>{{drive_status.files_queued or 0}}</b>
+            <span>Queued</span>
+        </div>
+        <div>
+            <b>{{drive_status.files_skipped or 0}}</b>
+            <span>Skipped</span>
+        </div>
+        <div>
+            <b>{{drive_status.duplicates or 0}}</b>
+            <span>Duplicates</span>
+        </div>
+    </div>
+
+    {% if drive_status.last_error %}
+    <p class="error-text">{{drive_status.last_error}}</p>
+    {% endif %}
+</div>
+
 <div class="card">
 
-    <h2>Task Dashboard</h2>
+    <div class="section-title">
+        <h2>Task Dashboard</h2>
+        <span>{{total_tasks}} total</span>
+    </div>
 
     <table>
 
@@ -70,7 +122,10 @@
             <th>Deadline</th>
             <th>Priority</th>
             <th>Status</th>
-            <th>Action</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th>Signals</th>
+            <th>Workflow</th>
         </tr>
 
         {% for task in tasks %}
@@ -83,32 +138,55 @@
 
             <td>{{task[3]}}</td>
 
-            <td>{{task[4]}}</td>
+            <td><span class="badge priority-{{task[4]|lower}}">{{task[4]}}</span></td>
 
-            <td>{{task[5]}}</td>
+            <td><span class="badge status-{{task[5]|lower|replace(' ', '-')}}">{{task[5]}}</span></td>
+
+            <td>{{task[6]}}</td>
+
+            <td>{{task[7]}}</td>
+
+            <td>
+                <span class="signal">Duplicates {{task[8] or 0}}</span>
+                <span class="signal">Escalation {{task[9] or 0}}</span>
+            </td>
 
             <td>
 
-                {% if task[5] == "Pending" %}
+                <div class="status-actions">
+                    {% if task[5] != "Pending" %}
+                    <form action="/task/{{task[0]}}/status" method="POST">
+                        <input type="hidden" name="status" value="Pending">
+                        <button type="submit" class="tiny secondary">Pending</button>
+                    </form>
+                    {% endif %}
 
-                <a class="btn"
-                   href="/complete/{{task[0]}}">
-                    Complete
-                </a>
+                    {% if task[5] != "In Progress" %}
+                    <form action="/task/{{task[0]}}/status" method="POST">
+                        <input type="hidden" name="status" value="In Progress">
+                        <button type="submit" class="tiny">Start</button>
+                    </form>
+                    {% endif %}
 
-                {% else %}
-
-                <span style="color:green;font-weight:bold;">
-                    Done
-                </span>
-
-                {% endif %}
+                    {% if task[5] != "Completed" %}
+                    <form action="/task/{{task[0]}}/status" method="POST">
+                        <input type="hidden" name="status" value="Completed">
+                        <button type="submit" class="tiny success">Complete</button>
+                    </form>
+                    {% endif %}
+                </div>
 
             </td>
 
         </tr>
 
         {% endfor %}
+
+        {% if not tasks %}
+        <tr>
+            <td colspan="9" class="empty-state">No tasks yet. Upload a meeting or check Google Drive.</td>
+        </tr>
+        {% endif %}
 
     </table>
 

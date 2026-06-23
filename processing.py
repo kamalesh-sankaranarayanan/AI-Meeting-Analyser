@@ -1,24 +1,21 @@
-from sqlalchemy import exists
-from sympy import content
 import whisperx
 import sqlite3
 import json
 import os
 import logging
+import hashlib
+import re
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI
 import httpx
  
-# Pyannote for speaker diarization
-try:
-    from pyannote.audio import Pipeline
-    HAS_PYANNOTE = True
-except ImportError:
-    HAS_PYANNOTE = False
+HAS_PYANNOTE = None
  
 from mailer import send_task_alert
 from report import create_report
+from schema import init_db
  
 # Setup logging
 logging.basicConfig(
@@ -46,6 +43,103 @@ def validate_environment():
         logger.info("✅ Environment variables validated")
  
 validate_environment()
+try:
+    init_db()
+except sqlite3.Error as exc:
+    logger.warning(f"Database migration skipped: {exc}")
+
+
+def current_time():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def normalize_text(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def task_key(task: str, owner: str = "") -> str:
+    return f"{normalize_text(owner or 'Unassigned')}::{normalize_text(task)}"
+
+
+def normalize_owner(owner: str) -> str:
+    owner = str(owner or "").strip()
+    if not owner:
+        return "Unassigned"
+
+    normalized = normalize_text(owner)
+    pronouns = {
+        "i",
+        "me",
+        "my",
+        "myself",
+        "we",
+        "us",
+        "our",
+        "ourselves",
+        "speaker",
+        "unknown",
+        "none",
+        "na",
+        "n a",
+    }
+    if normalized in pronouns:
+        return "Unassigned"
+
+    return owner
+
+
+def file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def update_processing_job(job_id, stage, progress, status="Processing", message=None, error=None, meeting_id=None):
+    if not job_id:
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect("database.db")
+        conn.execute("PRAGMA journal_mode=MEMORY")
+        cursor = conn.cursor()
+        completed_at = current_time() if status in ("Completed", "Failed", "Duplicate") else None
+        cursor.execute("""
+            UPDATE processing_jobs
+            SET stage=?,
+                progress=?,
+                status=?,
+                message=COALESCE(?, message),
+                error=COALESCE(?, error),
+                meeting_id=COALESCE(?, meeting_id),
+                last_updated=?,
+                completed_at=COALESCE(?, completed_at)
+            WHERE id=?
+        """, (stage, progress, status, message, error, meeting_id, current_time(), completed_at, job_id))
+        conn.commit()
+    except sqlite3.Error as exc:
+        logger.warning(f"Unable to update processing job {job_id}: {exc}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def call_llm_with_retries(**kwargs):
+    last_error = None
+    for attempt in range(3):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            last_error = exc
+            wait = 2 ** attempt
+            logger.warning(f"LLM call failed on attempt {attempt + 1}/3: {exc}")
+            time.sleep(wait)
+    raise last_error
  
 # ============================================================================
 # INITIALIZE CLIENTS
@@ -99,9 +193,9 @@ def get_diarization_pipeline():
     
     Requires Hugging Face token
     """
-    global _DIARIZATION_PIPELINE
+    global _DIARIZATION_PIPELINE, HAS_PYANNOTE
     if _DIARIZATION_PIPELINE is None:
-        if not HAS_PYANNOTE:
+        if HAS_PYANNOTE is False:
             logger.warning("⚠️ Pyannote not installed. Speaker diarization disabled.")
             return None
         
@@ -110,6 +204,8 @@ def get_diarization_pipeline():
             return None
         
         try:
+            from pyannote.audio import Pipeline
+            HAS_PYANNOTE = True
             logger.info("Loading Pyannote diarization pipeline...")
             _DIARIZATION_PIPELINE = Pipeline.from_pretrained(
                                     "pyannote/speaker-diarization-3.1",
@@ -117,10 +213,52 @@ def get_diarization_pipeline():
                                     )
             logger.info("✅ Pyannote diarization pipeline loaded successfully")
         except Exception as e:
+            HAS_PYANNOTE = False
             logger.warning(f"Failed to load Pyannote: {e}")
             return None
     
     return _DIARIZATION_PIPELINE
+
+
+def run_diarization(diarization_pipeline, audio_path: str):
+    """
+    Run Pyannote diarization without relying on TorchCodec's file decoder.
+
+    Some Windows/PyTorch/TorchCodec combinations load the Pyannote pipeline but
+    fail when Pyannote tries to decode a filename directly. WhisperX already
+    gives us a reliable 16 kHz mono loader, so pass preloaded waveform data.
+    """
+    try:
+        return diarization_pipeline(audio_path)
+    except Exception as first_error:
+        first_error_text = str(first_error)
+        logger.warning(f"Path-based diarization failed: {first_error_text}. Retrying with preloaded audio.")
+
+    try:
+        import torch
+
+        audio = whisperx.load_audio(audio_path)
+        waveform = torch.from_numpy(audio).float().unsqueeze(0)
+        return diarization_pipeline({
+            "waveform": waveform,
+            "sample_rate": 16000
+        })
+    except Exception as second_error:
+        raise RuntimeError(f"{first_error_text}; preloaded audio retry failed: {second_error}")
+
+
+def iter_diarization_tracks(diarization):
+    """Yield (turn, speaker) pairs from Pyannote 3 Annotation or Pyannote 4 output."""
+    annotation = diarization
+    if hasattr(diarization, "speaker_diarization"):
+        annotation = diarization.speaker_diarization
+
+    if hasattr(annotation, "itertracks"):
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
+            yield turn, speaker
+        return
+
+    raise TypeError(f"Unsupported diarization output type: {type(diarization).__name__}")
  
  
 # ============================================================================
@@ -165,10 +303,10 @@ def transcribe_audio(audio_path: str) -> dict:
         if diarization_pipeline:
             try:
                 logger.info("🎤 Running speaker diarization...")
-                diarization = diarization_pipeline(audio_path)
+                diarization = run_diarization(diarization_pipeline, audio_path)
                 
                 # Map speakers to timestamps
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                for turn, speaker in iter_diarization_tracks(diarization):
                     # Store speaker at each timestamp
                     for t in [int(turn.start * 10) / 10, int(turn.end * 10) / 10]:
                         speakers_by_time[t] = speaker
@@ -251,7 +389,7 @@ Transcript (shortened):
 {transcript[:4000]}
 """
         
-        response = client.chat.completions.create(
+        response = call_llm_with_retries(
             model="openrouter/free",
             messages=[{"role": "user", "content": summary_prompt}],
             max_tokens=500
@@ -278,6 +416,76 @@ Transcript (shortened):
 # ============================================================================
 # TASK EXTRACTION (IMPROVED - now has speaker context)
 # ============================================================================
+
+def build_task_extraction_prompt(transcript: str) -> str:
+    return f"""
+You are an expert project manager converting a meeting transcript into execution-ready tasks.
+
+Goal:
+Extract every actionable item that represents unfinished work, a commitment, a blocker to resolve, a decision that needs follow-up, or a deliverable that must be produced.
+
+Use the transcript evidence carefully. People often imply tasks indirectly through status updates.
+
+Strong extraction rules:
+1. Extract concrete work only. Do not create tasks for casual discussion, greetings, completed work, or background context.
+2. Prefer action verbs: Finalize, Create, Review, Test, Resolve, Prepare, Share, Schedule, Update, Deploy, Integrate.
+3. Split unrelated work into separate tasks.
+4. Merge duplicates or near-duplicates.
+5. Keep each task short and specific, ideally 4-12 words.
+6. If work is already clearly completed, do not extract it unless a follow-up remains.
+7. If a blocker is mentioned, create a task to resolve the blocker.
+8. If a risk could delay work, create a task only when an owner/action is implied.
+
+Owner rules:
+- If a named person is assigned, use that name.
+- If a speaker says "I will", "I'll", "let me", or "my team will", use that speaker label/name if available.
+- If a person is only mentioned as affected but not assigned, do not make them the owner.
+- If ownership is unclear, use "Unassigned".
+- Never invent names.
+- Never return pronouns as owners. "I", "me", "we", "my team", and "us" must become a speaker label if available, otherwise "Unassigned".
+
+Deadline rules:
+- Preserve natural deadlines exactly as stated: "today", "tomorrow", "Friday", "next week", "before demo".
+- If no deadline is stated or strongly implied, use "".
+- Do not invent dates.
+
+Priority rules:
+- High: due today/tomorrow, urgent/asap/immediate, blocker, production issue, demo-critical, client-critical.
+- Medium: due this week, named weekday, important project deliverable.
+- Low: no deadline and not risky.
+
+Status rules:
+- Use "Pending" for newly extracted tasks.
+- Use "In Progress" only when the transcript clearly says work has started but is unfinished.
+- Do not use "Completed" for extracted tasks.
+
+Return ONLY valid JSON. No markdown, no explanations.
+
+JSON schema:
+[
+  {{
+    "task": "short action item",
+    "owner": "person or Unassigned",
+    "deadline": "natural language deadline or empty string",
+    "priority": "High | Medium | Low",
+    "status": "Pending | In Progress",
+    "evidence": "short transcript phrase that supports this task"
+  }}
+]
+
+Examples:
+"Rahul, finish the wireframes by Thursday"
+=> {{"task":"Finish wireframes","owner":"Rahul","deadline":"Thursday","priority":"Medium","status":"Pending","evidence":"Rahul, finish the wireframes by Thursday"}}
+
+"Testing has not started and the demo is tomorrow"
+=> {{"task":"Start testing before demo","owner":"Unassigned","deadline":"tomorrow","priority":"High","status":"Pending","evidence":"Testing has not started and the demo is tomorrow"}}
+
+"The API integration is half done"
+=> {{"task":"Complete API integration","owner":"Unassigned","deadline":"","priority":"Medium","status":"In Progress","evidence":"API integration is half done"}}
+
+Transcript:
+{transcript[:8000]}
+"""
  
 def extract_tasks(transcript: str) -> list:
     """
@@ -394,11 +602,12 @@ Transcript (shortened):
 """   
         transcript = transcript.replace("[Unknown]", "")
         transcript = transcript.strip()
-        response = client.chat.completions.create(
+        task_prompt = build_task_extraction_prompt(transcript)
+        response = call_llm_with_retries(
             model="openai/gpt-4o-mini",
             messages=[{"role": "user", "content": task_prompt}],
             temperature=0.1,
-            max_tokens=1000
+            max_tokens=1600
         )
         
         message = response.choices[0].message
@@ -477,9 +686,31 @@ Transcript (shortened):
             "priority": "Medium"
         })
 
+        cleaned_tasks = []
         for task in tasks:
-            deadline = task.get("deadline", "")
-            task["priority"] = calculate_priority(deadline)
+            if not isinstance(task, dict):
+                continue
+
+            deadline = str(task.get("deadline", "") or "").strip()
+            priority = str(task.get("priority", "") or "").strip().title()
+            status = str(task.get("status", "") or "Pending").strip().title()
+
+            if priority not in ["High", "Medium", "Low"]:
+                priority = calculate_priority(deadline)
+            if status not in ["Pending", "In Progress"]:
+                status = "Pending"
+
+            task["task"] = str(task.get("task", "") or "").strip()
+            task["owner"] = normalize_owner(task.get("owner", ""))
+            task["deadline"] = deadline
+            task["priority"] = priority
+            task["status"] = status
+            task["evidence"] = str(task.get("evidence", "") or "").strip()
+
+            if task["task"]:
+                cleaned_tasks.append(task)
+
+        tasks = cleaned_tasks
 
         logger.info(f"✅ Extracted {len(tasks)} tasks")
         return tasks
@@ -547,7 +778,7 @@ Transcript (shortened):
 {transcript}
 """
         
-        response = client.chat.completions.create(
+        response = call_llm_with_retries(
             model="openrouter/free",
             messages=[{"role": "user", "content": risk_prompt}],
             max_tokens=500
@@ -699,11 +930,106 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
             conn.close()
  
  
+def save_to_database(filename: str, transcript: str, summary: str, risk: str, tasks: list, file_hash: str = ""):
+    """
+    Save meeting output with meeting deduplication and canonical task updates.
+    This definition intentionally overrides the legacy implementation above.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect("database.db")
+        conn.execute("PRAGMA journal_mode=MEMORY")
+        cursor = conn.cursor()
+        created_at = current_time()
+
+        if file_hash:
+            cursor.execute("SELECT id FROM meetings WHERE file_hash=? LIMIT 1", (file_hash,))
+            existing_meeting = cursor.fetchone()
+            if existing_meeting:
+                return existing_meeting[0]
+
+        cursor.execute("""
+            INSERT INTO meetings (filename, transcript, summary, risk, created_at, last_updated, file_hash, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            os.path.basename(filename),
+            transcript,
+            summary,
+            risk,
+            created_at,
+            created_at,
+            file_hash,
+            "Processed"
+        ))
+
+        meeting_id = cursor.lastrowid
+
+        for task in tasks:
+            if not validate_task(task):
+                logger.warning(f"Skipping invalid task: {task}")
+                continue
+
+            owner = normalize_owner(task.get("owner", ""))
+            key = task_key(task.get("task", ""), owner)
+            priority = task.get("priority") or calculate_priority(task.get("deadline", ""))
+
+            cursor.execute("""
+                SELECT id
+                FROM tasks
+                WHERE task_key=?
+                LIMIT 1
+            """, (key,))
+            existing_task = cursor.fetchone()
+
+            if existing_task:
+                cursor.execute("""
+                    UPDATE tasks
+                    SET deadline=COALESCE(NULLIF(?, ''), deadline),
+                        priority=?,
+                        last_updated=?,
+                        duplicate_count=COALESCE(duplicate_count, 0) + 1
+                    WHERE id=?
+                """, (task.get("deadline", ""), priority, current_time(), existing_task[0]))
+                continue
+
+            cursor.execute("""
+                INSERT INTO tasks
+                (meeting_id, task, owner, deadline, priority, status, created_at, last_updated, task_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                meeting_id,
+                task.get("task", ""),
+                owner,
+                task.get("deadline", ""),
+                priority,
+                "Pending",
+                current_time(),
+                current_time(),
+                key
+            ))
+
+            if priority == "High":
+                send_task_alert({**task, "owner": owner, "priority": priority})
+
+        conn.commit()
+        logger.info(f"Saved meeting {meeting_id} with {len(tasks)} extracted tasks")
+        return meeting_id
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error: {e}")
+        if conn:
+            conn.rollback()
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
 # ============================================================================
 # MAIN PROCESSING FUNCTION
 # ============================================================================
  
-def process_meeting(audio_path: str) -> tuple:
+def process_meeting(audio_path: str, job_id=None) -> tuple:
     """
     Main function to process a meeting recording end-to-end
     
@@ -724,19 +1050,26 @@ def process_meeting(audio_path: str) -> tuple:
         logger.info(f"🎯 PROCESSING MEETING: {os.path.basename(audio_path)}")
         logger.info("="*70)
         
+        meeting_hash = file_sha256(audio_path)
+        update_processing_job(job_id, "Transcription", 10, message="Transcribing audio")
+
         # Step 1: Transcribe with speakers (MAJOR FIX: WhisperX + Pyannote)
         logger.info("\n[1/5] TRANSCRIPTION WITH SPEAKER DIARIZATION")
         result = transcribe_audio(audio_path)
         transcript = result['transcript']
+        if not transcript.strip():
+            raise ValueError("Transcript is empty. Please upload a clearer audio file.")
         logger.info(f"Language: {result['language']}")
         logger.info(f"Segments: {len(result['segments'])}")
         
         # Step 2: Generate summary
+        update_processing_job(job_id, "Summary", 35, message="Generating summary")
         logger.info("\n[2/5] SUMMARY GENERATION")
         summary = extract_summary(transcript)
         
         # Step 3: Extract tasks (now with speaker context)
         # Step 3: Extract tasks
+        update_processing_job(job_id, "Tasks", 55, message="Extracting action items")
         logger.info("\n[3/5] TASK EXTRACTION")
         tasks = extract_tasks(transcript)
 
@@ -776,11 +1109,13 @@ def process_meeting(audio_path: str) -> tuple:
         f"Fallback extracted {len(tasks)} tasks"
     )
 
+        update_processing_job(job_id, "Risk Analysis", 70, message="Detecting risks and blockers")
 # Step 4: Detect risks
         logger.info("\n[4/5] RISK ANALYSIS")
         risk = detect_risks(transcript)
         
         # Step 5: Generate report
+        update_processing_job(job_id, "Report", 85, message="Generating report")
         logger.info("\n[5/5] REPORT GENERATION & STORAGE")
         if create_report(os.path.basename(audio_path), summary, risk):
             logger.info("✅ Report generated")
@@ -788,7 +1123,9 @@ def process_meeting(audio_path: str) -> tuple:
             logger.warning("⚠️ Report generation failed, continuing...")
         
         # Step 6: Save to database
-        meeting_id = save_to_database(audio_path, transcript, summary, risk, tasks)
+        update_processing_job(job_id, "Saving", 95, message="Saving meeting and tasks")
+        meeting_id = save_to_database(audio_path, transcript, summary, risk, tasks, meeting_hash)
+        update_processing_job(job_id, "Completed", 100, status="Completed", message="Processing complete", meeting_id=meeting_id)
         
         logger.info("\n" + "="*70)
         logger.info(f"✅ PROCESSING COMPLETE")
@@ -812,6 +1149,15 @@ def process_meeting(audio_path: str) -> tuple:
 def print_startup_status():
     """Print available features on startup"""
     print("\n" + "="*70)
+    print("AUDIO PROCESSING SETUP STATUS")
+    print("="*70)
+    print("OK  WhisperX:          Better transcription with word timestamps")
+    print(f"{'OK' if HAS_PYANNOTE else 'WARN'} Pyannote:           Speaker diarization {'enabled' if HAS_PYANNOTE else 'disabled'}")
+    print(f"{'OK' if HF_TOKEN else 'WARN'} Hugging Face Token: {'CONFIGURED' if HF_TOKEN else 'NOT SET'}")
+    print("OK  OpenRouter API:    LLM for summary/tasks/risks")
+    print("="*70 + "\n")
+    return
+    print("\n" + "="*70)
     print("🎵 AUDIO PROCESSING SETUP STATUS")
     print("="*70)
     print(f"✅ WhisperX:               Better transcription with word timestamps")
@@ -820,5 +1166,5 @@ def print_startup_status():
     print(f"✅ OpenRouter API:         LLM for summary/tasks/risks")
     print("="*70 + "\n")
  
-# Print status when module loads
-print_startup_status()
+if os.getenv("SHOW_PROCESSING_STARTUP_STATUS", "false").lower() == "true":
+    print_startup_status()

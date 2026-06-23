@@ -1,11 +1,18 @@
-from flask import Flask, render_template, request, redirect, send_file
+from flask import Flask, render_template, request, redirect, send_file, jsonify, url_for
 from werkzeug.utils import secure_filename
 import sqlite3
 import os
 import logging
+import threading
+import time
+import json
+import re
 from datetime import datetime
-from processing import process_meeting
-from workflow import meeting_graph
+from schema import init_db
+from agents import run_all_agents
+from jobs import create_job_or_duplicate, run_processing_job
+from drive_watcher import run_drive_check
+from state import load_state
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -14,6 +21,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
  
 app = Flask(__name__)
+try:
+    init_db()
+except sqlite3.Error as exc:
+    logger.warning(f"Database migration skipped during startup: {exc}")
  
 # Configuration
 UPLOAD_FOLDER = "uploads"
@@ -36,6 +47,7 @@ DEBUG_MODE = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 def get_db_connection():
     """Create and return database connection"""
     conn = sqlite3.connect("database.db")
+    conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row  # Access columns by name
     return conn
  
@@ -43,6 +55,47 @@ def get_db_connection():
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def current_time():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def extract_speaker_labels(transcript, tasks=None):
+    labels = set(re.findall(r"\bSPEAKER[_\s-]?\d+\b", transcript or "", flags=re.IGNORECASE))
+    labels.update(re.findall(r"\bSpeaker[_\s-]?\d+\b", transcript or ""))
+
+    for task in tasks or []:
+        owner = task["owner"] if isinstance(task, sqlite3.Row) else task.get("owner", "")
+        labels.update(re.findall(r"\bSPEAKER[_\s-]?\d+\b", owner or "", flags=re.IGNORECASE))
+
+    normalized = []
+    for label in labels:
+        digits = re.findall(r"\d+", label)
+        if digits:
+            normalized.append(f"SPEAKER_{int(digits[0]):02d}")
+
+    return sorted(set(normalized))
+
+
+def load_speaker_map(raw_value):
+    if not raw_value:
+        return {}
+    try:
+        value = json.loads(raw_value)
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def drive_watcher_loop():
+    interval = int(os.getenv("DRIVE_WATCH_INTERVAL_SECONDS", "120"))
+    while True:
+        try:
+            run_drive_check(async_process=True)
+        except Exception as exc:
+            logger.error(f"Drive watcher check failed: {exc}", exc_info=True)
+        time.sleep(interval)
  
 # ============================================================================
 # DASHBOARD ROUTE
@@ -73,15 +126,24 @@ def dashboard():
         completed_tasks = cursor.fetchone()[0]
         # Get recent tasks
         cursor.execute("""
-            SELECT id, task, owner, deadline, priority, status
+            SELECT id, task, owner, deadline, priority, status, created_at, last_updated, duplicate_count, escalation_level
             FROM tasks
-            ORDER BY created_at DESC
+            ORDER BY last_updated DESC
             LIMIT 20
         """)
         tasks = cursor.fetchall()
         
         cursor.execute("SELECT COUNT(*) FROM meetings")
         total_meetings = cursor.fetchone()[0]
+        drive_status = load_state().get("drive_status", {
+            "status": "Not checked",
+            "last_checked": "",
+            "files_seen": 0,
+            "files_queued": 0,
+            "files_skipped": 0,
+            "duplicates": 0,
+            "last_error": ""
+        })
         
         return render_template(
             "dashboard.html",
@@ -90,7 +152,8 @@ def dashboard():
             pending_tasks=pending_tasks,
             high_priority=high_priority,
             total_meetings=total_meetings,
-            completed_tasks=completed_tasks
+            completed_tasks=completed_tasks,
+            drive_status=drive_status
         )
         
     except sqlite3.Error as e:
@@ -125,7 +188,7 @@ def meetings():
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, filename, summary, risk, created_at
+            SELECT id, filename, summary, risk, created_at, last_updated, status
             FROM meetings
             ORDER BY created_at DESC
             LIMIT 50
@@ -195,6 +258,18 @@ def process():
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         logger.info(f"Saving file: {filepath}")
         file.save(filepath)
+
+        result = create_job_or_duplicate(filename, filepath, source="manual")
+        duplicate_id = result["duplicate_meeting_id"]
+        if duplicate_id:
+            logger.info(f"Duplicate meeting upload detected: {filename}")
+            return redirect(url_for("meeting_detail", meeting_id=duplicate_id))
+
+        job_id = result["job_id"]
+        worker = threading.Thread(target=run_processing_job, args=(job_id, filepath), daemon=True)
+        worker.start()
+
+        return redirect(url_for("processing_status", job_id=job_id))
         
         # Process meeting
         logger.info(f"Processing meeting: {filename}")
@@ -234,10 +309,93 @@ def process():
             error="Failed to process meeting. Please try again."
         ), 500
  
+
+@app.route("/processing/<int:job_id>")
+def processing_status(job_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM processing_jobs WHERE id=?", (job_id,))
+    job = cursor.fetchone()
+    conn.close()
+
+    if not job:
+        return render_template("error.html", error="Processing job not found"), 404
+
+    return render_template("processing_status.html", job=job)
+
+
+@app.route("/api/jobs/<int:job_id>")
+def processing_job_api(job_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM processing_jobs WHERE id=?", (job_id,))
+    job = cursor.fetchone()
+    conn.close()
+
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    data = dict(job)
+    if data.get("meeting_id"):
+        data["meeting_url"] = url_for("meeting_detail", meeting_id=data["meeting_id"])
+    return jsonify(data)
+
+
+@app.route("/agents/run", methods=["POST"])
+def run_agents_route():
+    results = run_all_agents()
+    return redirect(url_for("dashboard", reminders=results["reminders"], escalations=results["escalations"], closures=results["closures"]))
+
+
+@app.route("/drive/check", methods=["POST"])
+def drive_check_route():
+    try:
+        results = run_drive_check(async_process=True)
+        logger.info(f"Drive check completed with {len(results)} result(s)")
+    except Exception as exc:
+        logger.error(f"Drive check failed: {exc}", exc_info=True)
+    return redirect(url_for("dashboard"))
+
  
 # ============================================================================
 # COMPLETE TASK ROUTE
 # ============================================================================
+
+VALID_TASK_STATUSES = {"Pending", "In Progress", "Completed"}
+
+
+@app.route("/task/<int:task_id>/status", methods=["POST"])
+def update_task_status(task_id):
+    """Update task workflow status"""
+    status = request.form.get("status", "").strip()
+    if status not in VALID_TASK_STATUSES:
+        logger.warning(f"Invalid task status attempted: {status}")
+        return redirect("/")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
+        if not cursor.fetchone():
+            logger.warning(f"Attempt to update non-existent task: {task_id}")
+            return redirect("/")
+
+        completed_at = current_time() if status == "Completed" else None
+        cursor.execute(
+            "UPDATE tasks SET status=?, completed_at=?, last_updated=? WHERE id=?",
+            (status, completed_at, current_time(), task_id)
+        )
+        conn.commit()
+        logger.info(f"Task {task_id} status updated to {status}")
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error in update_task_status: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect("/")
  
 @app.route("/complete/<int:task_id>", methods=["GET","POST"])
 def complete_task(task_id):
@@ -255,8 +413,8 @@ def complete_task(task_id):
         
         # Update status
         cursor.execute(
-            "UPDATE tasks SET status='Completed' WHERE id=?",
-            (task_id,)
+            "UPDATE tasks SET status='Completed', completed_at=?, last_updated=? WHERE id=?",
+            (current_time(), current_time(), task_id)
         )
         
         conn.commit()
@@ -308,6 +466,36 @@ def analytics():
         
         total = completed + pending + in_progress
         completion_rate = (completed / total * 100) if total > 0 else 0
+
+        priority_total = high + medium + low
+        status_segments = {
+            "completed": (completed / total * 100) if total else 0,
+            "pending": (pending / total * 100) if total else 0,
+            "in_progress": (in_progress / total * 100) if total else 0,
+        }
+        priority_segments = {
+            "high": (high / priority_total * 100) if priority_total else 0,
+            "medium": (medium / priority_total * 100) if priority_total else 0,
+            "low": (low / priority_total * 100) if priority_total else 0,
+        }
+
+        cursor.execute("""
+            SELECT COALESCE(NULLIF(owner, ''), 'Unassigned') AS owner, COUNT(*) AS count
+            FROM tasks
+            GROUP BY COALESCE(NULLIF(owner, ''), 'Unassigned')
+            ORDER BY count DESC, owner ASC
+            LIMIT 6
+        """)
+        owner_rows = cursor.fetchall()
+        max_owner_count = max([row["count"] for row in owner_rows], default=0)
+        owner_workload = [
+            {
+                "owner": row["owner"],
+                "count": row["count"],
+                "percent": (row["count"] / max_owner_count * 100) if max_owner_count else 0
+            }
+            for row in owner_rows
+        ]
         
         return render_template(
             "analytics.html",
@@ -318,7 +506,11 @@ def analytics():
             medium=medium,
             low=low,
             total=total,
-            completion_rate=f"{completion_rate:.1f}%"
+            completion_rate=f"{completion_rate:.1f}%",
+            completion_rate_value=f"{completion_rate:.1f}",
+            status_segments=status_segments,
+            priority_segments=priority_segments,
+            owner_workload=owner_workload
         )
         
     except sqlite3.Error as e:
@@ -344,7 +536,7 @@ def meeting_detail(meeting_id):
         
         # Get meeting details
         cursor.execute("""
-            SELECT id, filename, transcript, summary, risk, created_at
+            SELECT id, filename, transcript, summary, risk, created_at, last_updated, status, speaker_map
             FROM meetings
             WHERE id=?
         """, (meeting_id,))
@@ -357,20 +549,24 @@ def meeting_detail(meeting_id):
         
         # Get tasks for this meeting
         cursor.execute("""
-            SELECT id, task, owner, deadline, priority, status, created_at
+            SELECT id, task, owner, deadline, priority, status, created_at, last_updated, duplicate_count, escalation_level
             FROM tasks
             WHERE meeting_id=?
-            ORDER BY priority DESC, created_at DESC
+            ORDER BY priority DESC, last_updated DESC
         """, (meeting_id,))
         
         tasks = cursor.fetchall()
+        speaker_map = load_speaker_map(meeting["speaker_map"])
+        speaker_labels = extract_speaker_labels(meeting["transcript"], tasks)
         
         logger.info(f"Loaded meeting detail: {meeting_id} with {len(tasks)} tasks")
         
         return render_template(
             "meeting_detail.html",
             meeting=meeting,
-            tasks=tasks
+            tasks=tasks,
+            speaker_labels=speaker_labels,
+            speaker_map=speaker_map
         )
         
     except sqlite3.Error as e:
@@ -383,6 +579,65 @@ def meeting_detail(meeting_id):
     finally:
         if conn:
             conn.close()
+
+
+@app.route("/meeting/<int:meeting_id>/speakers", methods=["POST"])
+def update_speaker_names(meeting_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, transcript, speaker_map FROM meetings WHERE id=?", (meeting_id,))
+        meeting = cursor.fetchone()
+
+        if not meeting:
+            return render_template("error.html", error="Meeting not found"), 404
+
+        cursor.execute("SELECT owner FROM tasks WHERE meeting_id=?", (meeting_id,))
+        task_rows = cursor.fetchall()
+        speaker_labels = extract_speaker_labels(meeting["transcript"], task_rows)
+        existing_map = load_speaker_map(meeting["speaker_map"])
+        updated_map = dict(existing_map)
+
+        for label in speaker_labels:
+            name = request.form.get(f"speaker_{label}", "").strip()
+            if name:
+                updated_map[label] = name
+                cursor.execute("""
+                    UPDATE tasks
+                    SET owner=?,
+                        last_updated=?
+                    WHERE meeting_id=?
+                      AND (
+                          owner=?
+                          OR owner=?
+                          OR owner=?
+                      )
+                """, (
+                    name,
+                    current_time(),
+                    meeting_id,
+                    label,
+                    label.replace("_", " "),
+                    f"[{label}]"
+                ))
+
+        cursor.execute("""
+            UPDATE meetings
+            SET speaker_map=?,
+                last_updated=?
+            WHERE id=?
+        """, (json.dumps(updated_map), current_time(), meeting_id))
+        conn.commit()
+        logger.info(f"Updated speaker names for meeting {meeting_id}")
+
+    except sqlite3.Error as e:
+        logger.error(f"Database error in update_speaker_names: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(url_for("meeting_detail", meeting_id=meeting_id))
  
  
 # ============================================================================
@@ -430,6 +685,11 @@ def server_error(e):
  
 if __name__ == "__main__":
     logger.info(f"Starting Flask app (Debug: {DEBUG_MODE})")
+    if os.getenv("DRIVE_WATCHER_ENABLED", "true").lower() == "true":
+        watcher = threading.Thread(target=drive_watcher_loop, daemon=True)
+        watcher.start()
+        logger.info("Google Drive watcher started")
+
     app.run(
         debug=DEBUG_MODE,
         host="0.0.0.0",

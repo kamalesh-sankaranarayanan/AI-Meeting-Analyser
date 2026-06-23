@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Processing Meeting</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<nav class="navbar">
+    <a href="/">Dashboard</a>
+    <a href="/upload">Upload Meeting</a>
+    <a href="/meetings">Meeting History</a>
+    <a href="/analytics">Analytics</a>
+</nav>
+
+<div class="container">
+    <h1>Processing Meeting</h1>
+
+    <div class="card">
+        <h2 id="stage">{{job["stage"]}}</h2>
+        <p>{{job["filename"]}}</p>
+
+        <div class="progress-shell">
+            <div id="progressBar" class="progress-bar" style="width: {{job['progress']}}%;"></div>
+        </div>
+
+        <p><b>Status:</b> <span id="status">{{job["status"]}}</span></p>
+        <p><b>Progress:</b> <span id="progressText">{{job["progress"]}}</span>%</p>
+        <p id="message">{{job["message"] or ""}}</p>
+        <p id="errorText" class="error-text"></p>
+
+        <a id="meetingLink" class="btn hidden" href="#">View Meeting</a>
+    </div>
+</div>
+
+<script>
+const jobId = {{job["id"]}};
+
+async function refreshJob() {
+    const response = await fetch(`/api/jobs/${jobId}`);
+    const job = await response.json();
+
+    document.getElementById("stage").textContent = job.stage || "Processing";
+    document.getElementById("status").textContent = job.status || "";
+    document.getElementById("progressText").textContent = job.progress || 0;
+    document.getElementById("progressBar").style.width = `${job.progress || 0}%`;
+    document.getElementById("message").textContent = job.message || "";
+    document.getElementById("errorText").textContent = job.error || "";
+
+    if (job.meeting_url) {
+        const link = document.getElementById("meetingLink");
+        link.href = job.meeting_url;
+        link.classList.remove("hidden");
+    }
+
+    if (job.status === "Completed" && job.meeting_url) {
+        window.setTimeout(() => window.location.href = job.meeting_url, 1200);
+        return;
+    }
+
+    if (job.status !== "Failed") {
+        window.setTimeout(refreshJob, 2000);
+    }
+}
+
+refreshJob();
+</script>
+
+</body>
+</html>

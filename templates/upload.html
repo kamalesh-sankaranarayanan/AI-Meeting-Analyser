@@ -26,21 +26,32 @@
 
 <div class="container">
 
-    <h1>AI Meeting-to-Execution Agent</h1>
+    <div class="page-header">
+        <div>
+            <h1>Upload Meeting</h1>
+            <p>Queue a recording for transcription, task extraction, risk analysis, and follow-up automation.</p>
+        </div>
+    </div>
 
     <div class="card">
 
-        <h2>Upload Meeting Recording</h2>
+        <div class="section-title">
+            <h2>Meeting Recording</h2>
+            <span>MP3, WAV, OGG, M4A, FLAC, or MP4</span>
+        </div>
 
         <form
+            class="upload-form"
             action="/process"
             method="POST"
             enctype="multipart/form-data">
 
-            <input
-                type="file"
-                name="audio"
-                required>
+            <label class="file-input">
+                <input
+                    type="file"
+                    name="audio"
+                    required>
+            </label>
 
             <button type="submit">
                 Process Meeting
@@ -48,6 +59,11 @@
 
         </form>
 
+    </div>
+
+    <div class="card info-card">
+        <h2>Google Drive Watcher</h2>
+        <p>When the app is running, Drive recordings are checked automatically in the background. You can also trigger a check from the dashboard.</p>
     </div>
     {% if success %}
 <div class="card">

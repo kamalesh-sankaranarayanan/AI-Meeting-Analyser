@@ -55,6 +55,12 @@ class MeetingState(TypedDict):
     meeting_id: int
 
     report_path: str
+
+    job_id: int
+
+    file_hash: str
+
+    agent_results: dict
 # ============================================================================
 # POTENTIAL GRAPH STRUCTURE
 # ============================================================================

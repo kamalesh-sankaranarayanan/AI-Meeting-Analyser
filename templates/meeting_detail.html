@@ -37,14 +37,52 @@ href="/static/style.css">
 {{meeting[5]}}
 </p>
 
+<p>
+<b>Last Updated:</b>
+{{meeting[6]}}
+</p>
+
+<p>
+<b>Status:</b>
+{{meeting[7]}}
+</p>
+
 </div>
+
+{% if speaker_labels %}
+<div class="card">
+
+<div class="section-title">
+<h2>Speaker Names</h2>
+<span>Map anonymous labels to people</span>
+</div>
+
+<form action="/meeting/{{meeting[0]}}/speakers" method="POST" class="speaker-form">
+
+{% for label in speaker_labels %}
+<label class="speaker-field">
+<span>{{label}}</span>
+<input
+    type="text"
+    name="speaker_{{label}}"
+    value="{{speaker_map.get(label, '')}}"
+    placeholder="Enter speaker name">
+</label>
+{% endfor %}
+
+<button type="submit">Save Speaker Names</button>
+
+</form>
+
+</div>
+{% endif %}
 
 <div class="card">
 
 <h2>Transcript</h2>
 
-<p>
-{{meeting[1]}}
+<p class="transcript-text">
+{{meeting[2]}}
 </p>
 
 </div>
@@ -54,7 +92,7 @@ href="/static/style.css">
 <h2>Summary</h2>
 
 <p>
-{{meeting[2]}}
+{{meeting[3]}}
 </p>
 
 </div>
@@ -64,7 +102,7 @@ href="/static/style.css">
 <h2>Risk Analysis</h2>
 
 <p>
-{{meeting[3]}}
+{{meeting[4]}}
 </p>
 
 </div>
@@ -80,16 +118,25 @@ href="/static/style.css">
 <th>Deadline</th>
 <th>Priority</th>
 <th>Status</th>
+<th>Created</th>
+<th>Updated</th>
+<th>Signals</th>
 </tr>
 
 {% for task in tasks %}
 
 <tr>
-{{task['task']}}
-{{task['owner']}}
-{{task['deadline']}}
-{{task['priority']}}
-{{task['status']}}
+<td>{{task['task']}}</td>
+<td>{{task['owner']}}</td>
+<td>{{task['deadline']}}</td>
+<td>{{task['priority']}}</td>
+<td>{{task['status']}}</td>
+<td>{{task['created_at']}}</td>
+<td>{{task['last_updated']}}</td>
+<td>
+Duplicates: {{task['duplicate_count'] or 0}}<br>
+Escalation: {{task['escalation_level'] or 0}}
+</td>
 </tr>
 
 {% endfor %}
