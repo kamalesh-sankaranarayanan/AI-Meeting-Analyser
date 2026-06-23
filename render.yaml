@@ -2,7 +2,7 @@ services:
   - type: web
     name: ai-meeting-task-dashboard
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 1 --threads 2 --timeout 300
     envVars:
@@ -15,7 +15,7 @@ services:
       - key: DRIVE_WATCH_INTERVAL_SECONDS
         value: "120"
       - key: DATA_DIR
-        value: /var/data
+        value: .
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
@@ -28,7 +28,4 @@ services:
         sync: false
       - key: GOOGLE_TOKEN_JSON
         sync: false
-    disk:
-      name: app-data
-      mountPath: /var/data
-      sizeGB: 1
+    
