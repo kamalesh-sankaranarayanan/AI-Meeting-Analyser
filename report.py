@@ -5,6 +5,7 @@ from reportlab.lib import colors
 import os
 import logging
 from datetime import datetime
+from storage import REPORTS_DIR
  
 logger = logging.getLogger(__name__)
  
@@ -23,13 +24,13 @@ def create_report(filename, summary, risk):
     """
     try:
         # Ensure reports directory exists
-        os.makedirs("reports", exist_ok=True)
+        os.makedirs(REPORTS_DIR, exist_ok=True)
         
         # Generate report filename
         name = os.path.splitext(
     os.path.basename(filename)
 )[0]
-        pdf_path = f"reports/{name}.pdf"
+        pdf_path = os.path.join(REPORTS_DIR, f"{name}.pdf")
         
         logger.info(f"Creating report: {pdf_path}")
         

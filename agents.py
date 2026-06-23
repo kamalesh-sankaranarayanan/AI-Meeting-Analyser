@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from mailer import send_alert
+from storage import DB_PATH
 
 
 def now_text():
@@ -44,7 +45,7 @@ def _parse_due_at(deadline, created_at):
 
 
 def run_followup_reminder_agent():
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -76,7 +77,7 @@ def run_followup_reminder_agent():
 
 
 def run_escalation_agent():
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -113,7 +114,7 @@ def run_escalation_agent():
 
 
 def run_closure_detection_agent():
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()

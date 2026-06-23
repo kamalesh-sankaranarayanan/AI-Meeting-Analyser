@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sqlite3
 import threading
@@ -11,9 +12,9 @@ from werkzeug.utils import secure_filename
 
 from jobs import create_job_or_duplicate, run_processing_job
 from state import load_state, save_state
+from storage import DB_PATH, DOWNLOAD_DIR
 # ---------------- CONFIG ----------------
 PROCESSED_FILE = "processed_files.txt"
-DOWNLOAD_DIR = "downloads"
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 AUDIO_TYPES = {"audio/mpeg", "audio/wav", "audio/mp3", "audio/x-wav"}
@@ -38,7 +39,10 @@ def update_drive_status(**updates):
 
 
 def get_drive_service():
-    if os.path.exists("token.json"):
+    token_json = os.getenv("GOOGLE_TOKEN_JSON")
+    if token_json:
+        creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+    elif os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     elif os.path.exists("token.pickle"):
         import pickle
@@ -59,7 +63,7 @@ def save_processed(file_id: str):
 
 def has_recorded_drive_job(file_id: str) -> bool:
     try:
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("PRAGMA journal_mode=MEMORY")
         cursor = conn.cursor()
         columns = {row[1] for row in cursor.execute("PRAGMA table_info(processing_jobs)").fetchall()}

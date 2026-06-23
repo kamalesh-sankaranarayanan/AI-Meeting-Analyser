@@ -1,8 +1,6 @@
 import sqlite3
 from datetime import datetime
-
-
-DB_PATH = "database.db"
+from storage import DB_PATH, ensure_storage_dirs
 
 
 def now_text():
@@ -27,6 +25,7 @@ def _add_column(cursor, table, column, definition):
 
 
 def init_db():
+    ensure_storage_dirs()
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     cursor = conn.cursor()

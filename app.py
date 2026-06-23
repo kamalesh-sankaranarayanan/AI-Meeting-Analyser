@@ -13,6 +13,7 @@ from agents import run_all_agents
 from jobs import create_job_or_duplicate, run_processing_job
 from drive_watcher import run_drive_check
 from state import load_state
+from storage import DB_PATH, UPLOAD_FOLDER, REPORTS_DIR, ensure_storage_dirs
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -21,13 +22,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
  
 app = Flask(__name__)
+ensure_storage_dirs()
 try:
     init_db()
 except sqlite3.Error as exc:
     logger.warning(f"Database migration skipped during startup: {exc}")
  
 # Configuration
-UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {
     'mp3',
     'wav',
@@ -42,11 +43,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
  
 # Get debug mode from environment
 DEBUG_MODE = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+_WATCHER_STARTED = False
  
  
 def get_db_connection():
     """Create and return database connection"""
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row  # Access columns by name
     return conn
@@ -96,6 +98,22 @@ def drive_watcher_loop():
         except Exception as exc:
             logger.error(f"Drive watcher check failed: {exc}", exc_info=True)
         time.sleep(interval)
+
+
+def start_drive_watcher_if_enabled():
+    global _WATCHER_STARTED
+    if _WATCHER_STARTED:
+        return
+    if os.getenv("DRIVE_WATCHER_ENABLED", "true").lower() != "true":
+        return
+
+    watcher = threading.Thread(target=drive_watcher_loop, daemon=True)
+    watcher.start()
+    _WATCHER_STARTED = True
+    logger.info("Google Drive watcher started")
+
+
+start_drive_watcher_if_enabled()
  
 # ============================================================================
 # DASHBOARD ROUTE
@@ -653,7 +671,7 @@ def download_report(filename):
 
         name = os.path.splitext(filename)[0]
 
-        filepath = f"reports/{name}.pdf"
+        filepath = os.path.join(REPORTS_DIR, f"{name}.pdf")
 
         if not os.path.exists(filepath):
             return "File not found", 404
@@ -685,10 +703,7 @@ def server_error(e):
  
 if __name__ == "__main__":
     logger.info(f"Starting Flask app (Debug: {DEBUG_MODE})")
-    if os.getenv("DRIVE_WATCHER_ENABLED", "true").lower() == "true":
-        watcher = threading.Thread(target=drive_watcher_loop, daemon=True)
-        watcher.start()
-        logger.info("Google Drive watcher started")
+    start_drive_watcher_if_enabled()
 
     app.run(
         debug=DEBUG_MODE,

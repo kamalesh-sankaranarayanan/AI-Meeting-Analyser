@@ -4,6 +4,7 @@ from datetime import datetime
 
 from processing import file_sha256, update_processing_job
 from workflow import meeting_graph
+from storage import DB_PATH
 
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,7 @@ def current_time():
 
 
 def get_db_connection():
-    conn = sqlite3.connect("database.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=MEMORY")
     conn.row_factory = sqlite3.Row
     return conn

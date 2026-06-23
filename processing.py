@@ -16,6 +16,7 @@ HAS_PYANNOTE = None
 from mailer import send_task_alert
 from report import create_report
 from schema import init_db
+from storage import DB_PATH
  
 # Setup logging
 logging.basicConfig(
@@ -105,7 +106,7 @@ def update_processing_job(job_id, stage, progress, status="Processing", message=
 
     conn = None
     try:
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("PRAGMA journal_mode=MEMORY")
         cursor = conn.cursor()
         completed_at = current_time() if status in ("Completed", "Failed", "Duplicate") else None
@@ -852,7 +853,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
     """
     conn = None
     try:
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Insert meeting
@@ -937,7 +938,7 @@ def save_to_database(filename: str, transcript: str, summary: str, risk: str, ta
     """
     conn = None
     try:
-        conn = sqlite3.connect("database.db")
+        conn = sqlite3.connect(DB_PATH)
         conn.execute("PRAGMA journal_mode=MEMORY")
         cursor = conn.cursor()
         created_at = current_time()

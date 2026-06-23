@@ -1,0 +1,14 @@
+Flask
+gunicorn
+python-dotenv
+openai
+httpx
+requests
+reportlab
+yagmail
+google-api-python-client
+google-auth
+google-auth-oauthlib
+langgraph
+whisperx
+pyannote.audio

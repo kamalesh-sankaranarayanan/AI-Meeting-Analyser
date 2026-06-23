@@ -30,6 +30,7 @@ class AppFlowTests(unittest.TestCase):
             "jobs",
             "agents",
             "drive_watcher",
+            "storage",
             "workflow",
             "processing",
         ]:
@@ -45,6 +46,7 @@ class AppFlowTests(unittest.TestCase):
             "jobs",
             "agents",
             "drive_watcher",
+            "storage",
             "workflow",
             "processing",
         ]:
