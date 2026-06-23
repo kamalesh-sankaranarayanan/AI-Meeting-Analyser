@@ -20,6 +20,8 @@ class AppFlowTests(unittest.TestCase):
         self.tmpdir.mkdir(parents=True, exist_ok=True)
         os.chdir(self.tmpdir)
         os.environ["DRIVE_WATCHER_ENABLED"] = "false"
+        os.environ["AUTH_ENABLED"] = "false"
+        os.environ.pop("APP_PASSWORD", None)
 
         if str(ROOT) not in sys.path:
             sys.path.insert(0, str(ROOT))
@@ -123,6 +125,62 @@ class AppFlowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response.headers["Location"].endswith("/meeting/7"))
+
+    def test_account_auth_register_login_and_reset(self):
+        os.environ["AUTH_ENABLED"] = "true"
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/register", response.headers["Location"])
+
+        response = self.client.post(
+            "/register",
+            data={
+                "name": "Demo User",
+                "email": "demo@example.com",
+                "password": "demo-pass-123",
+                "confirm_password": "demo-pass-123",
+                "next": "/",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.headers["Location"].endswith("/"))
+
+        self.client.post("/logout")
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+
+        response = self.client.post(
+            "/login",
+            data={"email": "demo@example.com", "password": "demo-pass-123", "next": "/"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+        self.client.post("/logout")
+        response = self.client.post("/forgot-password", data={"email": "demo@example.com"})
+        self.assertEqual(response.status_code, 200)
+
+        conn = sqlite3.connect("database.db")
+        token = conn.execute("SELECT token FROM password_resets ORDER BY id DESC LIMIT 1").fetchone()[0]
+        conn.close()
+
+        response = self.client.post(
+            f"/reset-password/{token}",
+            data={"password": "new-pass-123", "confirm_password": "new-pass-123"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        response = self.client.post(
+            "/login",
+            data={"email": "demo@example.com", "password": "new-pass-123", "next": "/"},
+        )
+        self.assertEqual(response.status_code, 302)
 
     def test_upload_queues_processing_job(self):
         with patch.object(self.app_module, "create_job_or_duplicate", return_value={"duplicate_meeting_id": None, "job_id": 42}), \

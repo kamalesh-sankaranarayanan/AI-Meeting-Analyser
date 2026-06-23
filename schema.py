@@ -72,6 +72,29 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_login_at TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS password_resets(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
     _add_column(cursor, "meetings", "last_updated", "TEXT")
     _add_column(cursor, "meetings", "file_hash", "TEXT")
     _add_column(cursor, "meetings", "status", "TEXT DEFAULT 'Processed'")
@@ -106,6 +129,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_meetings_created_at ON meetings(created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_meetings_file_hash ON meetings(file_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token)")
     if {"source", "source_id"}.issubset(_columns(cursor, "processing_jobs")):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_processing_jobs_source ON processing_jobs(source, source_id)")
 

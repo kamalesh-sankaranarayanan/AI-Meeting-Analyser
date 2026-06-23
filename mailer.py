@@ -58,3 +58,28 @@ def send_task_alert(task_info):
     """
     
     return send_alert(subject, body)
+
+
+def send_password_reset(to_email, reset_link):
+    try:
+        email = os.getenv("GMAIL_ADDRESS")
+        password = os.getenv("GMAIL_APP_PASSWORD")
+
+        if not email or not password:
+            return False
+
+        yag = yagmail.SMTP(email, password)
+        yag.send(
+            to=to_email,
+            subject="Reset your AI Meeting Dashboard password",
+            contents=f"""
+            <h2>Password reset</h2>
+            <p>Use this link to reset your password. It expires in 1 hour.</p>
+            <p><a href="{reset_link}">Reset password</a></p>
+            """
+        )
+        yag.close()
+        return True
+    except Exception as e:
+        print(f"Password reset email failed: {e}")
+        return False

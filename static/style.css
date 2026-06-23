@@ -100,6 +100,161 @@ button:hover{
 input[type=file]{
     margin-right:10px;
 }
+
+input[type=text],
+input[type=email],
+input[type=password]{
+    width:100%;
+    box-sizing:border-box;
+    padding:12px 14px;
+    border:1px solid #cbd5e1;
+    border-radius:6px;
+    font-size:15px;
+}
+
+label{
+    display:block;
+    margin-bottom:8px;
+    color:#334155;
+    font-weight:700;
+}
+
+.auth-page{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+}
+
+.auth-card{
+    width:100%;
+    max-width:380px;
+    background:white;
+    padding:28px;
+    border-radius:8px;
+    border:1px solid #e5e7eb;
+    box-shadow:0 16px 36px rgba(15,23,42,0.12);
+}
+
+.auth-card h1{
+    margin-bottom:8px;
+}
+
+.auth-card p{
+    color:#64748b;
+}
+
+.auth-brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:20px;
+}
+
+.auth-brand strong{
+    display:block;
+    color:#111827;
+    font-size:15px;
+    line-height:1.1;
+}
+
+.auth-brand span{
+    display:block;
+    color:#64748b;
+    font-size:13px;
+    margin-top:3px;
+}
+
+.auth-mark{
+    width:44px;
+    height:44px;
+    flex:0 0 44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    background:linear-gradient(135deg, #111827 0%, #1d4ed8 100%);
+    color:white;
+    font-weight:800;
+    letter-spacing:0;
+    box-shadow:0 10px 24px rgba(37,99,235,0.28);
+    position:relative;
+}
+
+.auth-mark::after{
+    content:"";
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    background:#22c55e;
+    border:2px solid white;
+    position:absolute;
+    right:-2px;
+    bottom:-2px;
+}
+
+.auth-card button{
+    width:100%;
+    margin-top:18px;
+}
+
+.auth-links{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    margin-top:18px;
+    font-size:14px;
+}
+
+.auth-links a{
+    color:#2563eb;
+    font-weight:700;
+    text-decoration:none;
+}
+
+.auth-links a:hover{
+    text-decoration:underline;
+}
+
+.success-text{
+    color:#15803d;
+    font-weight:700;
+}
+
+.reset-link-box{
+    margin-top:14px;
+    padding:12px;
+    border-radius:6px;
+    background:#eff6ff;
+    border:1px solid #bfdbfe;
+    word-break:break-word;
+}
+
+.reset-link-box span{
+    display:block;
+    color:#1e3a8a;
+    font-weight:800;
+    margin-bottom:6px;
+}
+
+.reset-link-box a{
+    color:#2563eb;
+    font-size:13px;
+}
+
+.logout-form{
+    margin-left:auto;
+}
+
+.logout-form button{
+    background:#1f2937;
+    padding:8px 12px;
+}
+
+.logout-form button:hover{
+    background:#374151;
+}
 .stat-card{
     background:white;
     padding:22px;

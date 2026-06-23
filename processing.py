@@ -156,6 +156,7 @@ HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY")
 LLM_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 WHISPERX_MODEL_SIZE = os.getenv("WHISPERX_MODEL_SIZE", "small")
 ENABLE_AUDIO_TRANSCRIPTION = os.getenv("ENABLE_AUDIO_TRANSCRIPTION", "true").lower() == "true"
+ENABLE_DIARIZATION = os.getenv("ENABLE_DIARIZATION", "true").lower() == "true"
  
 # ============================================================================
 # MODEL LOADING (Lazy - loaded once)
@@ -198,6 +199,10 @@ def get_diarization_pipeline():
     Requires Hugging Face token
     """
     global _DIARIZATION_PIPELINE, HAS_PYANNOTE
+    if not ENABLE_DIARIZATION:
+        logger.info("Speaker diarization disabled by ENABLE_DIARIZATION=false")
+        return None
+
     if _DIARIZATION_PIPELINE is None:
         if HAS_PYANNOTE is False:
             logger.warning("âš ï¸ Pyannote not installed. Speaker diarization disabled.")

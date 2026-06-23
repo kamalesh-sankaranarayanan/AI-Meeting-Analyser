@@ -1,5 +1,6 @@
-from flask import Flask, render_template, request, redirect, send_file, jsonify, url_for
+from flask import Flask, render_template, request, redirect, send_file, jsonify, url_for, session
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
 import logging
@@ -7,13 +8,15 @@ import threading
 import time
 import json
 import re
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from schema import init_db
 from agents import run_all_agents
 from jobs import create_job_or_duplicate, run_processing_job
 from drive_watcher import run_drive_check
 from state import load_state
 from storage import DB_PATH, UPLOAD_FOLDER, REPORTS_DIR, ensure_storage_dirs
+from mailer import send_password_reset
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
  
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(32))
 ensure_storage_dirs()
 try:
     init_db()
@@ -58,6 +62,224 @@ def get_db_connection():
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def auth_enabled():
+    return os.getenv("AUTH_ENABLED", "true").lower() == "true"
+
+
+def auth_time():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def user_count():
+    conn = get_db_connection()
+    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_user_by_email(email):
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (email,)).fetchone()
+    conn.close()
+    return user
+
+
+def get_user_by_id(user_id):
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    return user
+
+
+def create_user(name, email, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO users (name, email, password_hash, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (name.strip(), email.strip().lower(), generate_password_hash(password), auth_time()))
+    conn.commit()
+    user_id = cursor.lastrowid
+    conn.close()
+    return user_id
+
+
+def create_password_reset(user_id):
+    token = secrets.token_urlsafe(32)
+    conn = get_db_connection()
+    conn.execute("""
+        INSERT INTO password_resets (user_id, token, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+    """, (
+        user_id,
+        token,
+        auth_time(),
+        (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_reset_by_token(token):
+    conn = get_db_connection()
+    reset = conn.execute("""
+        SELECT pr.*, u.email
+        FROM password_resets pr
+        JOIN users u ON u.id=pr.user_id
+        WHERE pr.token=?
+          AND pr.used_at IS NULL
+          AND pr.expires_at >= ?
+    """, (token, auth_time())).fetchone()
+    conn.close()
+    return reset
+
+
+def safe_next_url(value):
+    if value and value.startswith("/") and not value.startswith("//"):
+        return value
+    return url_for("dashboard")
+
+
+@app.before_request
+def require_login():
+    if not auth_enabled():
+        return None
+
+    public_endpoints = {"login", "register", "forgot_password", "reset_password", "static"}
+    if request.endpoint in public_endpoints:
+        return None
+
+    if user_count() == 0:
+        return redirect(url_for("register", next=request.full_path if request.query_string else request.path))
+
+    if session.get("user_id") and get_user_by_id(session["user_id"]):
+        return None
+
+    return redirect(url_for("login", next=request.full_path if request.query_string else request.path))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not auth_enabled():
+        return redirect(url_for("dashboard"))
+
+    if user_count() == 0:
+        return redirect(url_for("register", next=request.args.get("next", "/")))
+
+    next_url = safe_next_url(request.args.get("next"))
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        user = get_user_by_email(email)
+        if user and check_password_hash(user["password_hash"], password):
+            session.clear()
+            session["user_id"] = user["id"]
+            session["user_email"] = user["email"]
+            conn = get_db_connection()
+            conn.execute("UPDATE users SET last_login_at=? WHERE id=?", (auth_time(), user["id"]))
+            conn.commit()
+            conn.close()
+            return redirect(safe_next_url(request.form.get("next")))
+        return render_template("login.html", error="Invalid password", next_url=next_url), 401
+
+    return render_template("login.html", next_url=next_url)
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if not auth_enabled():
+        return redirect(url_for("dashboard"))
+
+    registration_open = user_count() == 0 or os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+    if not registration_open:
+        return redirect(url_for("login"))
+
+    next_url = safe_next_url(request.args.get("next"))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if not name or not email or not password:
+            return render_template("register.html", error="All fields are required.", next_url=next_url), 400
+        if len(password) < 8:
+            return render_template("register.html", error="Password must be at least 8 characters.", next_url=next_url), 400
+        if password != confirm_password:
+            return render_template("register.html", error="Passwords do not match.", next_url=next_url), 400
+        if get_user_by_email(email):
+            return render_template("register.html", error="An account already exists for this email.", next_url=next_url), 400
+
+        user_id = create_user(name, email, password)
+        session.clear()
+        session["user_id"] = user_id
+        session["user_email"] = email
+        return redirect(safe_next_url(request.form.get("next")))
+
+    return render_template("register.html", next_url=next_url)
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if not auth_enabled():
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        user = get_user_by_email(email)
+        reset_link = None
+        email_sent = False
+        if user:
+            token = create_password_reset(user["id"])
+            reset_link = url_for("reset_password", token=token, _external=True)
+            email_sent = send_password_reset(user["email"], reset_link)
+
+        return render_template(
+            "forgot_password.html",
+            success="If that email exists, a reset link has been prepared.",
+            reset_link=reset_link if not email_sent else None
+        )
+
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    if not auth_enabled():
+        return redirect(url_for("dashboard"))
+
+    reset = get_reset_by_token(token)
+    if not reset:
+        return render_template("reset_password.html", error="This reset link is invalid or expired."), 400
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        if len(password) < 8:
+            return render_template("reset_password.html", token=token, error="Password must be at least 8 characters."), 400
+        if password != confirm_password:
+            return render_template("reset_password.html", token=token, error="Passwords do not match."), 400
+
+        conn = get_db_connection()
+        conn.execute(
+            "UPDATE users SET password_hash=? WHERE id=?",
+            (generate_password_hash(password), reset["user_id"])
+        )
+        conn.execute("UPDATE password_resets SET used_at=? WHERE id=?", (auth_time(), reset["id"]))
+        conn.commit()
+        conn.close()
+        return redirect(url_for("login"))
+
+    return render_template("reset_password.html", token=token)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def current_time():

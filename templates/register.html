@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Register</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+<div class="auth-page">
+    <form class="auth-card" method="POST" action="/register">
+        <div class="auth-brand">
+            <div class="auth-mark">AM</div>
+            <div>
+                <strong>AI Meeting</strong>
+                <span>Task Dashboard</span>
+            </div>
+        </div>
+        <h1>Create account</h1>
+        <p>Set up access for the meeting execution dashboard.</p>
+
+        <input type="hidden" name="next" value="{{ next_url }}">
+
+        <label for="name">Name</label>
+        <input id="name" name="name" type="text" autocomplete="name" required>
+
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+
+        <label for="confirm_password">Confirm password</label>
+        <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+
+        {% if error %}
+        <p class="error-text">{{ error }}</p>
+        {% endif %}
+
+        <button type="submit">Create account</button>
+
+        <div class="auth-links">
+            <a href="/login">Already have an account?</a>
+        </div>
+    </form>
+</div>
+</body>
+
+</html>

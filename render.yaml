@@ -20,6 +20,8 @@ services:
         value: tiny
       - key: ENABLE_AUDIO_TRANSCRIPTION
         value: "false"
+      - key: ENABLE_DIARIZATION
+        value: "false"
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL
@@ -31,5 +33,11 @@ services:
       - key: GMAIL_APP_PASSWORD
         sync: false
       - key: GOOGLE_TOKEN_JSON
+        sync: false
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: ALLOW_REGISTRATION
+        value: "false"
+      - key: SECRET_KEY
         sync: false
     
