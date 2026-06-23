@@ -16,6 +16,8 @@ services:
         value: "120"
       - key: DATA_DIR
         value: .
+      - key: WHISPERX_MODEL_SIZE
+        value: tiny
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

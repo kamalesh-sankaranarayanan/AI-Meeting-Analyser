@@ -153,6 +153,8 @@ client = OpenAI(
 )
  
 HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY")
+LLM_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+WHISPERX_MODEL_SIZE = os.getenv("WHISPERX_MODEL_SIZE", "small")
  
 # ============================================================================
 # MODEL LOADING (Lazy - loaded once)
@@ -174,8 +176,8 @@ def get_whisperx_model():
     global _WHISPERX_MODEL
     if _WHISPERX_MODEL is None:
         try:
-            logger.info("Loading WhisperX model (base)...")
-            _WHISPERX_MODEL = whisperx.load_model("small", device="cpu", compute_type="int8")
+            logger.info(f"Loading WhisperX model ({WHISPERX_MODEL_SIZE})...")
+            _WHISPERX_MODEL = whisperx.load_model(WHISPERX_MODEL_SIZE, device="cpu", compute_type="int8")
             logger.info("✅ WhisperX model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load WhisperX: {e}")
@@ -391,7 +393,7 @@ Transcript (shortened):
 """
         
         response = call_llm_with_retries(
-            model="openrouter/free",
+            model=LLM_MODEL,
             messages=[{"role": "user", "content": summary_prompt}],
             max_tokens=500
         )
@@ -605,7 +607,7 @@ Transcript (shortened):
         transcript = transcript.strip()
         task_prompt = build_task_extraction_prompt(transcript)
         response = call_llm_with_retries(
-            model="openai/gpt-4o-mini",
+            model=LLM_MODEL,
             messages=[{"role": "user", "content": task_prompt}],
             temperature=0.1,
             max_tokens=1600
@@ -780,7 +782,7 @@ Transcript (shortened):
 """
         
         response = call_llm_with_retries(
-            model="openrouter/free",
+            model=LLM_MODEL,
             messages=[{"role": "user", "content": risk_prompt}],
             max_tokens=500
         )
