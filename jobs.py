@@ -1,9 +1,8 @@
 import logging
 import sqlite3
+import hashlib
 from datetime import datetime
 
-from processing import file_sha256, update_processing_job
-from workflow import meeting_graph
 from storage import DB_PATH
 
 
@@ -25,6 +24,14 @@ def _has_columns(cursor, table, columns):
     cursor.execute(f"PRAGMA table_info({table})")
     existing = {row[1] for row in cursor.fetchall()}
     return all(column in existing for column in columns)
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def create_processing_job(filename, filepath, source="manual", source_id=None):
@@ -64,6 +71,9 @@ def find_duplicate_meeting(file_hash):
 
 
 def run_processing_job(job_id, filepath):
+    from processing import update_processing_job
+    from workflow import meeting_graph
+
     try:
         update_processing_job(job_id, "Starting", 5, message="Preparing meeting workflow")
         meeting_graph.invoke({"audio_path": filepath, "job_id": job_id})
