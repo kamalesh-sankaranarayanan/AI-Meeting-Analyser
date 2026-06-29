@@ -287,12 +287,11 @@ def current_time():
 
 
 def extract_speaker_labels(transcript, tasks=None):
-    labels = set(re.findall(r"\bSPEAKER[_\s-]?\d+\b", transcript or "", flags=re.IGNORECASE))
-    labels.update(re.findall(r"\bSpeaker[_\s-]?\d+\b", transcript or ""))
+    labels = set(re.findall(r"\bSPEAKER[_-]?\d+\b", transcript or "", flags=re.IGNORECASE))
 
     for task in tasks or []:
         owner = task["owner"] if isinstance(task, sqlite3.Row) else task.get("owner", "")
-        labels.update(re.findall(r"\bSPEAKER[_\s-]?\d+\b", owner or "", flags=re.IGNORECASE))
+        labels.update(re.findall(r"\bSPEAKER[_-]?\d+\b", owner or "", flags=re.IGNORECASE))
 
     normalized = []
     for label in labels:

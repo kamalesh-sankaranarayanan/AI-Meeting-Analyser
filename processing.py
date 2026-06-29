@@ -268,6 +268,46 @@ def iter_diarization_tracks(diarization):
         return
 
     raise TypeError(f"Unsupported diarization output type: {type(diarization).__name__}")
+
+
+def normalize_speaker_label(speaker):
+    match = re.search(r"(\d+)", str(speaker or ""))
+    if match:
+        return f"SPEAKER_{int(match.group(1)):02d}"
+    return str(speaker or "Unknown").strip() or "Unknown"
+
+
+def segment_overlap(start_a, end_a, start_b, end_b):
+    return max(0, min(end_a, end_b) - max(start_a, start_b))
+
+
+def speaker_for_segment(segment, diarization_turns):
+    if not diarization_turns:
+        return "Unknown"
+
+    segment_start = float(segment.get("start", 0) or 0)
+    segment_end = float(segment.get("end", segment_start) or segment_start)
+    if segment_end <= segment_start:
+        segment_end = segment_start + 0.01
+
+    best_speaker = "Unknown"
+    best_overlap = 0
+    for turn_start, turn_end, speaker in diarization_turns:
+        overlap = segment_overlap(segment_start, segment_end, turn_start, turn_end)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_speaker = speaker
+
+    if best_overlap > 0:
+        return best_speaker
+
+    midpoint = (segment_start + segment_end) / 2
+    nearest_turn = min(
+        diarization_turns,
+        key=lambda item: min(abs(midpoint - item[0]), abs(midpoint - item[1])),
+        default=None
+    )
+    return nearest_turn[2] if nearest_turn else "Unknown"
  
  
 # ============================================================================
@@ -326,20 +366,22 @@ def transcribe_audio(audio_path: str) -> dict:
         
         # Step 3: Get speaker diarization (NEW FEATURE)
         diarization_pipeline = get_diarization_pipeline()
-        speakers_by_time = {}
+        diarization_turns = []
         
         if diarization_pipeline:
             try:
                 logger.info("ðŸŽ¤ Running speaker diarization...")
                 diarization = run_diarization(diarization_pipeline, audio_path)
                 
-                # Map speakers to timestamps
+                # Store speaker turns for overlap-based segment attribution.
                 for turn, speaker in iter_diarization_tracks(diarization):
-                    # Store speaker at each timestamp
-                    for t in [int(turn.start * 10) / 10, int(turn.end * 10) / 10]:
-                        speakers_by_time[t] = speaker
+                    diarization_turns.append((
+                        float(turn.start),
+                        float(turn.end),
+                        normalize_speaker_label(speaker)
+                    ))
                 
-                unique_speakers = len(set(speakers_by_time.values()))
+                unique_speakers = len({speaker for _, _, speaker in diarization_turns})
                 logger.info(f"âœ… Diarization complete - Identified {unique_speakers} speakers")
                 
             except Exception as e:
@@ -357,14 +399,7 @@ def transcribe_audio(audio_path: str) -> dict:
             segment_start = segment['start']
             
             # Find speaker at this time
-            speaker = "Unknown"
-            if diarization and speakers_by_time:
-                # Find closest speaker timestamp
-                closest_time = min(speakers_by_time.keys(), 
-                                  key=lambda t: abs(t - segment_start),
-                                  default=None)
-                if closest_time is not None:
-                    speaker = speakers_by_time[closest_time]
+            speaker = speaker_for_segment(segment, diarization_turns if diarization else [])
             
             if segment_text:  # Skip empty segments
                 aligned_segments.append({

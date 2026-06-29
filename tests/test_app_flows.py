@@ -91,6 +91,35 @@ class AppFlowTests(unittest.TestCase):
         conn.close()
         return meeting_id
 
+    def seed_two_speaker_meeting(self):
+        conn = sqlite3.connect("database.db")
+        conn.execute("PRAGMA journal_mode=MEMORY")
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO meetings (filename, transcript, summary, risk, created_at, last_updated, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "two-speakers.wav",
+            "[SPEAKER_00] I will prepare SRS\n[SPEAKER_01] I will create wireframes",
+            "Summary",
+            "Risk",
+            "2026-06-20 10:00:00",
+            "2026-06-20 10:00:00",
+            "Processed"
+        ))
+        meeting_id = cursor.lastrowid
+        cursor.execute("""
+            INSERT INTO tasks (meeting_id, task, owner, deadline, priority, status, created_at, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (meeting_id, "Prepare SRS", "SPEAKER_00", "Friday", "Medium", "Pending", "2026-06-20 10:00:00", "2026-06-20 10:00:00"))
+        cursor.execute("""
+            INSERT INTO tasks (meeting_id, task, owner, deadline, priority, status, created_at, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (meeting_id, "Create wireframes", "SPEAKER_01", "Thursday", "Medium", "Pending", "2026-06-20 10:00:00", "2026-06-20 10:00:00"))
+        conn.commit()
+        conn.close()
+        return meeting_id
+
     def test_core_pages_render(self):
         self.seed_task()
 
@@ -244,6 +273,33 @@ class AppFlowTests(unittest.TestCase):
         conn.close()
         self.assertEqual(owner, "Rahul")
         self.assertIn("Rahul", speaker_map)
+
+    def test_two_speaker_meeting_only_asks_for_two_speaker_names(self):
+        meeting_id = self.seed_two_speaker_meeting()
+
+        response = self.client.get(f"/meeting/{meeting_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.count(b'name="speaker_SPEAKER_00"'), 1)
+        self.assertEqual(response.data.count(b'name="speaker_SPEAKER_01"'), 1)
+        self.assertNotIn(b'name="speaker_SPEAKER_02"', response.data)
+        self.assertNotIn(b'name="speaker_Unknown"', response.data)
+
+    def test_transcription_assigns_speaker_by_overlap(self):
+        processing = importlib.import_module("processing")
+        turns = [
+            (0.0, 2.0, "SPEAKER_00"),
+            (2.0, 5.0, "SPEAKER_01"),
+        ]
+
+        self.assertEqual(
+            processing.speaker_for_segment({"start": 0.5, "end": 1.6}, turns),
+            "SPEAKER_00"
+        )
+        self.assertEqual(
+            processing.speaker_for_segment({"start": 2.2, "end": 4.6}, turns),
+            "SPEAKER_01"
+        )
 
     def test_pronoun_owner_normalizes_to_unassigned(self):
         processing = importlib.import_module("processing")
